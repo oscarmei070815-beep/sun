@@ -1,0 +1,1325 @@
+# 零、执行约束（最高优先级，先读这一节）
+
+```text
+本文件是一个分章节的需求说明。如果前十九节的任何细节与第二十节"最终整合版"产生冲突，以第二十节为准；但第二十节未覆盖的细节（如特定镜头构图、UI 颜色、土星环条带数量），应参考前十九节的精确描述。第二十节之后新增的"二十一、交付清单"和"二十二、执行检查点"为硬性交付要求，必须满足。
+
+工程硬约束：
+
+1. 项目根目录固定为 D:\AI\codex-Project\claude-threejs-sun
+   - 所有源码、配置、README、静态资源均放在此目录下。
+   - 禁止在其他盘符或目录下创建文件。
+   - 项目目录下已有的 `图片/` 文件夹（参考截图）和 `prompt.txt`（本文件）必须保留不动。
+
+2. 技术栈锁定：
+   - 纯 JavaScript（不使用 TypeScript）
+   - 构建工具：Vite ^5.4
+   - 核心库：three@0.160.0（版本锁定，不要使用更高或更低版本）
+   - 所有 Three.js addons 通过 `three/addons/...` 路径导入（例如 `three/addons/controls/OrbitControls.js`、`three/addons/postprocessing/EffectComposer.js`、`three/addons/renderers/CSS2DRenderer.js`）
+   - UI 使用原生 DOM + CSS，不引入 React / Vue / Svelte 等前端框架
+   - 可选：GSAP（用于相机飞行 tween），如使用请固定 `gsap@^3.12`；不使用也可以用自写 lerp/easing
+   - dat.gui 可选，但本项目 UI 是自定义左侧面板，不推荐用 dat.gui 替代
+
+3. 外部资源禁令（严格）：
+   - 禁止从任何 CDN、HTTP URL、外部图片站点加载贴图。
+   - 禁止使用本机 `D:\AI\codex-Project\SVG图像生成\assets\textures\` 下的贴图（那是另一个项目）。
+   - 所有行星表面、太阳表面、土星环、天王星环、星场、云层、城市灯光、大气边缘等纹理，必须使用 ShaderMaterial、CanvasTexture、过程式 noise/fbm 或 DataTexture 在运行时生成。
+   - 如果某个天体确实需要"地图级"的真实贴图（例如地球大洲轮廓），使用 CanvasTexture + 绘制函数近似生成，不要引用外部图片。
+
+4. Node 环境：
+   - 假设用户本机已安装 Node.js 18+ 和 npm / pnpm / yarn 任一。
+   - README 中提供 npm 和 pnpm 两种启动命令。
+
+5. 交付方式：
+   - 最终产物是一个可运行的 Vite 项目。`npm install && npm run dev` 启动后，打开浏览器即看到完整太阳系场景。
+   - `npm run build` 产出 `dist/` 可直接部署到 GitHub Pages 的静态文件。
+   - `vite.config.js` 中 `base` 字段预留为 `'./'`（便于 GitHub Pages 子路径部署）。
+
+6. 临时文件处理：
+   - 执行过程中如果创建了测试文件、草稿 HTML、调试脚本等，必须在交付前删除或归类到 `trash/` 目录。
+   - README 中列出所有临时文件的位置，方便用户清理。
+```
+
+---
+
+# 背景（非指令，仅供理解意图）
+
+这个项目的目标是复现一个 YouTube 视频（https://www.youtube.com/watch?v=UfUBW9QcTjU&t=334s，从 5:34 开始）里展示的 Three.js 太阳系可视化应用。`图片/` 目录下存放了该视频的关键帧截图（共 13 张），是比文字描述更权威的参考。
+
+上一版 Prompt v2 的方向是对的，但现在应该升级为 **Prompt v3**：重点加入截图中明确出现的内容，包括：
+
+| 截图里体现的关键点                            | 需要加入 Prompt 的原因              |
+| ------------------------------------ | ---------------------------- |
+| 左侧完整控制面板                             | 这不是单纯 3D 场景，而是带控制台的 WebGL 应用 |
+| 下拉选择 Star / Planet / Moon / Belt     | 支持聚焦太阳、行星、卫星、小行星带、柯伊伯带       |
+| Cinematic Tour / Deep-Space View     | 需要预设相机模式和电影化飞行               |
+| Time scale、Pause、Bloom、Labels、Orbits | 需要可控动画系统，不只是自动旋转             |
+| 太阳程序化纹理、日冕、looping prominences       | 太阳要做成视觉核心，不能只是 glow 球        |
+| Uranus 倾斜、自带淡环、Titania/Oberon        | 天王星要接近“横躺”状态，并有卫星系统          |
+| Saturn 高细节环、多个卫星、环面阴影                | 土星环是重点特效，不是普通透明圆环            |
+| Earth 云层、大气蓝边、夜侧城市灯光                 | 地球要多层材质，不是单贴图球               |
+| 小行星带、Kuiper Veil、彗星/星云               | 场景有完整空间结构，包含多层粒子系统           |
+| Label pill 标签                        | 所有天体都有小型深色标签，跟随屏幕投影          |
+| 真实光照明暗面                              | 太阳方向决定行星、卫星的昼夜边界             |
+| “scale feels accurate”               | 比例不是绝对真实，但要让距离、大小、层级感觉可信     |
+
+下面是我根据你截图重新打磨后的 **最终推荐 Prompt v3**。
+
+---
+
+# Three.js 太阳系可视化复现 Prompt v3
+
+```text
+请使用 Three.js 从零实现一个高质量、可交互、电影感的 3D 太阳系可视化系统。目标是复现一个“完全用 Three.js 编码出来的太阳系 WebGL 应用”，不是普通的静态太阳系模型，也不是简单的几个球体绕太阳转。
+
+核心效果参考：
+一个深黑太空中的完整太阳系应用，左侧有半透明深色控制面板，中央是 3D 场景。系统包含程序化太阳、八大行星、冥王星、主要卫星、土星环、天王星环、小行星带、柯伊伯带、星云、彗星、标签、轨道线、自然太阳光照、时间控制和相机聚焦飞行。
+
+整体目标：
+- 视觉上像一个高级 Three.js demo。
+- 交互上像一个可探索的太阳系应用。
+- 结构上像一个完整 3D 场景系统，而不是随便把物体摆在一起。
+- 运动上要平滑、有层级、有真实感。
+```
+
+---
+
+# 一、整体画面风格
+
+```text
+画面风格要求：
+
+1. 背景为深黑色宇宙空间，不是纯黑空白。
+2. 使用大量星点构成多层星场，星点大小、亮度、距离感不同。
+3. 可以加入轻微蓝绿色或紫色星云雾感，但不要过度抢眼。
+4. 场景中有细长流星或彗星拖尾，数量少，作为空间动态点缀。
+5. 太阳系主体位于一个广阔 3D 空间中，支持近距离观察和远距离总览。
+6. 行星、卫星、小行星带、轨道线、标签都应能同时存在。
+7. 整体视觉应干净、深邃、科学、电影化。
+8. 不要做卡通风格。
+9. 不要做过度霓虹赛博朋克风。
+10. 不要做 2D 平面太阳系图。
+```
+
+---
+
+# 二、太阳效果
+
+```text
+太阳是整个系统的视觉中心和主要光源，必须重点实现。
+
+太阳要求：
+
+1. 位于太阳系中心。
+2. 太阳体积明显大于所有行星。
+3. 表面不是普通黄色球体，而是橙、黄、红混合的程序化等离子体纹理。
+4. 太阳表面要有类似流动斑纹、噪声、火焰纹、热流纹的效果。
+5. 使用 ShaderMaterial 或 CanvasTexture / procedural noise 生成动态太阳表面。
+6. 太阳外层有强烈但柔和的黄色 glow。
+7. glow 外侧再有橙红色 corona 日冕光晕。
+8. 可添加环状或弧状 looping prominences，也就是围绕太阳附近的淡红色弧线喷发结构。
+9. 使用 Bloom 或 UnrealBloomPass 增强太阳发光。
+10. 太阳自身材质应使用 MeshBasicMaterial 或 ShaderMaterial，不要被普通光照变暗。
+11. 太阳必须向全场提供 PointLight，成为行星和卫星明暗的真实来源。
+12. 行星受光面必须朝向太阳，背光面必须变暗。
+```
+
+---
+
+# 三、行星系统
+
+```text
+必须包含以下天体：
+
+- Star - Sun
+- Planet - Mercury
+- Planet - Venus
+- Planet - Earth
+- Earth Moon - Moon
+- Planet - Mars
+- Mars Moon - Phobos
+- Mars Moon - Deimos
+- Planet - Jupiter
+- Jupiter Moon - Io
+- Jupiter Moon - Europa
+- Jupiter Moon - Ganymede
+- Jupiter Moon - Callisto
+- Planet - Saturn
+- Saturn Moon - Titan
+- Saturn Moon - Enceladus
+- Saturn Moon - Rhea
+- Saturn Moon - Iapetus
+- Planet - Uranus
+- Uranus Moon - Titania
+- Uranus Moon - Oberon
+- Planet - Neptune
+- Neptune Moon - Triton
+- Planet - Pluto
+- Pluto Moon - Charon
+- Belt - Asteroid Belt
+- Belt - Kuiper Veil
+
+每个天体都需要有：
+- 名称
+- 类型
+- 显示半径
+- 轨道半径
+- 公转速度
+- 自转速度
+- 轴倾角
+- 颜色或贴图
+- 标签
+- 简短介绍
+- 是否可聚焦
+```
+
+---
+
+# 四、行星视觉细节
+
+```text
+行星不能只是纯色球体，每个都要有明显差异。
+
+Mercury:
+- 小型灰色岩石行星。
+- 表面可有噪声、坑洼感或斑驳纹理。
+
+Venus:
+- 偏黄白色或淡金色。
+- 有厚重大气感。
+- 可加入柔和云层纹理。
+
+Earth:
+- 必须是多层结构。
+- 有海洋、陆地、冰盖。
+- 有实时或动态云层。
+- 有蓝色大气边缘 glow。
+- 夜侧出现城市灯光，昼侧不显示城市灯光。
+- 有清晰昼夜分界线。
+- 月球围绕地球运动。
+- 月球也需要根据太阳方向产生明暗面。
+
+Mars:
+- 红橙色岩石行星。
+- 可有暗色地表斑块。
+- 有 Phobos 和 Deimos 两颗小卫星。
+
+Jupiter:
+- 巨大气态行星。
+- 有条纹云带。
+- 可加入大红斑。
+- 有 Io、Europa、Ganymede、Callisto 四颗主要卫星。
+- 木星尺寸要明显大于内行星。
+
+Saturn:
+- 土黄色气态行星。
+- 有巨大倾斜环带。
+- 环带必须是多层细密纹理，不是单一透明圆片。
+- 环带应有明暗层次、条纹、透明度变化。
+- 土星本体和环带都要受太阳光照影响。
+- 可实现土星本体投射到环带上的阴影。
+- 有 Titan、Enceladus、Rhea、Iapetus 等卫星。
+
+Uranus:
+- 淡青色或蓝绿色冰巨星。
+- 几乎横躺，轴倾角接近 90 度。
+- 有淡淡的环系统。
+- 环带可以偏竖直或明显倾斜，体现天王星特殊倾角。
+- 有 Titania 和 Oberon 卫星。
+- 表面可以有很淡的青色条带。
+
+Neptune:
+- 深蓝色冰巨星。
+- 可有淡色条纹。
+- 有 Triton 卫星。
+
+Pluto:
+- 小型远距离矮行星。
+- 有 Charon 卫星。
+- 可显示为较小但可聚焦对象。
+```
+
+---
+
+# 五、小行星带与柯伊伯带
+
+```text
+必须实现两个带状结构：
+
+1. Asteroid Belt
+- 位于 Mars 和 Jupiter 之间。
+- 由大量白色、灰色、灰褐色小岩石组成。
+- 小行星不能只是点，近距离看应有不规则岩石块感。
+- 使用 InstancedMesh 实例化渲染。
+- 至少生成 1000 个小行星实例。
+- 每个小行星应有随机：
+  - 半径
+  - 角度
+  - 轨道高度偏移
+  - 形状缩放
+  - 旋转角
+  - 自转速度
+  - 材质亮度
+- 小行星带整体呈横向环带，在远景中形成明显的白色碎石带。
+- 小行星带应缓慢旋转。
+
+2. Kuiper Veil
+- 位于 Neptune / Pluto 外侧。
+- 比小行星带更远、更暗、更稀疏。
+- 可使用 Points 或 InstancedMesh。
+- 呈淡淡的外层粒子环。
+- 有标签 “Kuiper Veil”。
+```
+
+---
+
+# 六、轨道线
+
+```text
+轨道线要求：
+
+1. 每颗行星都有自己的轨道线。
+2. 每颗卫星也可以有围绕母星的局部轨道线。
+3. 轨道线要细、暗、半透明。
+4. 轨道线颜色可以是深蓝灰、淡白或浅青色。
+5. 不要使用强烈霓虹色。
+6. 轨道线在深空中若隐若现即可。
+7. 轨道可以有轻微倾角，不要所有轨道都完全共面。
+8. 支持 UI 开关显示 / 隐藏轨道。
+```
+
+---
+
+# 七、运动与比例
+
+```text
+运动系统要求：
+
+1. 所有行星围绕太阳公转。
+2. 所有行星自身自转。
+3. 所有卫星围绕对应母星公转。
+4. 母星移动时，卫星系统要随母星整体移动。
+5. 小行星带整体缓慢旋转。
+6. 彗星或流星可以沿长椭圆轨道或随机深空路径运动。
+7. 运动必须平滑，不要像静态球体随机漂浮。
+8. 使用 requestAnimationFrame。
+9. 使用 THREE.Clock 的 delta time 更新动画。
+10. 不要让动画依赖固定帧率。
+
+比例要求：
+
+1. 不要求天文绝对真实比例，因为真实比例会导致画面不可读。
+2. 但必须让比例“感觉准确”：
+   - 太阳最大。
+   - 木星、土星明显大于内行星。
+   - 内行星靠近太阳。
+   - 外行星距离更远。
+   - 小行星带在 Mars 和 Jupiter 之间。
+   - Kuiper Veil 在 Neptune / Pluto 外侧。
+3. 行星尺寸可以适度夸张。
+4. 行星距离可以压缩。
+5. 但空间层级必须清晰。
+6. 相机拉远时，应能看出完整太阳系结构。
+7. 相机靠近时，应能看出行星、卫星、环带、光照细节。
+```
+
+---
+
+# 八、自然光照与明暗
+
+```text
+光照必须来自太阳方向，不能用固定方向光随便照亮。
+
+要求：
+
+1. 太阳是主光源。
+2. 使用 PointLight 从太阳位置发光。
+3. 行星朝向太阳的一侧明亮。
+4. 行星背向太阳的一侧变暗。
+5. 地球夜侧显示城市灯光。
+6. 地球昼侧不显示城市灯光。
+7. 月球、火卫、木卫、土卫等也应有太阳方向决定的明暗。
+8. 土星环要有受光面和背光面。
+9. 可以添加很弱的 AmbientLight，但不能破坏明显昼夜分界。
+10. 行星明暗边界应自然，不要硬切。
+11. 可以使用自定义 shader 实现 terminator 昼夜分界。
+```
+
+---
+
+# 九、标签系统
+
+```text
+必须实现标签系统。
+
+标签视觉：
+
+1. 标签是小型深色圆角 pill。
+2. 标签背景为半透明深蓝灰或黑灰。
+3. 标签文字为浅灰白色。
+4. 标签显示天体名称，例如：
+   - Sun
+   - Mercury
+   - Venus
+   - Earth
+   - Moon
+   - Mars
+   - Jupiter
+   - Saturn
+   - Uranus
+   - Neptune
+   - Pluto
+   - Titania
+   - Oberon
+   - Enceladus
+   - Asteroid Belt
+   - Kuiper Veil
+5. 标签始终面向屏幕。
+6. 标签随天体移动。
+7. 标签需要把 3D 世界坐标投影为 2D 屏幕坐标，或使用 CSS2DRenderer / CSS3DRenderer。
+8. 支持 UI 开关显示 / 隐藏标签。
+9. 标签不要遮挡过多主体。
+10. 远处小天体标签可以只在聚焦或 hover 时显示。
+```
+
+---
+
+# 十、左侧 UI 控制面板
+
+```text
+必须实现左侧控制面板，风格类似深色玻璃拟态控制台。
+
+位置：
+- 固定在画面左上侧。
+- 宽度约 300px。
+- 高度根据内容自适应。
+- 圆角边框。
+- 背景为深蓝黑色半透明。
+- 有细微边框和阴影。
+- 不要完全不透明，允许隐约看到背后星空。
+
+面板内容：
+
+标题：
+SOLAR SYSTEM
+
+副标题：
+Procedural worlds, rings, clouds, city lights, asteroid fields, nebulae, comets, and focus-mode flyovers.
+
+对象选择下拉框：
+- Free flight / manual camera
+- Star - Sun
+- Planet - Mercury
+- Planet - Venus
+- Planet - Earth
+- Earth Moon - Moon
+- Planet - Mars
+- Mars Moon - Phobos
+- Mars Moon - Deimos
+- Planet - Jupiter
+- Jupiter Moon - Io
+- Jupiter Moon - Europa
+- Jupiter Moon - Ganymede
+- Jupiter Moon - Callisto
+- Planet - Saturn
+- Saturn Moon - Titan
+- Saturn Moon - Enceladus
+- Saturn Moon - Rhea
+- Saturn Moon - Iapetus
+- Planet - Uranus
+- Uranus Moon - Titania
+- Uranus Moon - Oberon
+- Planet - Neptune
+- Neptune Moon - Triton
+- Planet - Pluto
+- Pluto Moon - Charon
+- Belt - Asteroid Belt
+- Belt - Kuiper Veil
+
+按钮：
+- Cinematic Tour
+- Deep-Space View
+
+时间控制：
+- Time scale 滑块
+- 显示当前倍率，例如 1.0x
+- 最小值可以是 0x 或 0.1x
+- 最大值可以是 100x 或更高
+
+复选框：
+- Orbits
+- Labels
+- Bloom
+- Pause
+
+信息卡片：
+根据当前选中的天体动态变化。
+
+示例：
+
+Sun:
+A living procedural star: layered plasma texture, additive corona, looping prominences, and bloom-heavy lens glow. The light source for the whole scene sits at its core.
+
+Earth:
+Oceans, continents, ice caps, live cloud layer, blue atmospheric rim, and city lights that appear only on the night side.
+
+Uranus:
+An ice giant tilted almost sideways, with pale cyan bands and a delicate faint ring system.
+
+Enceladus:
+A bright icy moon with blue-white cracks, tucked near Saturn's rings.
+```
+
+---
+
+# 十一、交互与相机
+
+```text
+相机系统要求：
+
+1. 支持 OrbitControls。
+2. 用户可以拖拽旋转视角。
+3. 用户可以滚轮缩放。
+4. 用户可以平移视角。
+5. 点击或从下拉框选择任意天体后，相机平滑飞行到该天体附近。
+6. 聚焦时，相机继续跟随该天体运动。
+7. 选择 Free flight / manual camera 后，取消跟随，用户自由控制。
+8. Cinematic Tour 按钮启动自动电影镜头：
+   - 先飞近太阳。
+   - 再掠过内行星。
+   - 再穿越小行星带。
+   - 再看木星和木卫系统。
+   - 再看土星环和土卫。
+   - 再看天王星倾斜环。
+   - 最后拉远到完整太阳系。
+9. Deep-Space View 按钮把相机拉远，显示太阳、行星、小行星带、柯伊伯带和星场整体结构。
+10. 相机飞行动画要平滑，可以使用 lerp、slerp 或 tween。
+11. 聚焦天体时，不能瞬间跳转。
+12. 聚焦不同尺度对象时，相机距离要自动适配：
+   - 太阳距离远一些。
+   - 行星距离适中。
+   - 卫星距离近一些。
+   - 小行星带和柯伊伯带使用广角远景。
+```
+
+---
+
+# 十二、底部提示条
+
+```text
+在画面右下方或底部添加一个半透明提示条。
+
+内容示例：
+Click a planet or moon to focus it. Drag to orbit, scroll to zoom. Try Earth at night, Saturn's rings, Jupiter's storms, and the asteroid belt.
+
+样式：
+- 深色半透明背景。
+- 圆角。
+- 小号浅色文字。
+- 不遮挡主要天体。
+```
+
+---
+
+# 十三、程序化生成要求
+
+```text
+尽量使用程序化方式生成视觉细节，而不是依赖大量外部模型。
+
+必须程序化或半程序化生成：
+
+1. 星场：
+   - 使用 BufferGeometry + PointsMaterial。
+   - 多层星点。
+   - 随机大小、亮度和距离。
+
+2. 太阳纹理：
+   - 使用 noise、fbm、canvas 或 shader 生成流动纹理。
+   - 颜色为黄、橙、红。
+   - 可以随时间变化。
+
+3. 太阳日冕：
+   - 使用透明 Sprite、ShaderMaterial 或多层球壳。
+   - additive blending。
+   - bloom 增强。
+
+4. 行星纹理：
+   - 可以使用真实贴图。
+   - 如果没有贴图，用 CanvasTexture 生成程序化纹理。
+   - 不同行星必须有明显差异。
+
+5. 地球云层：
+   - 单独透明球壳。
+   - 比地球半径略大。
+   - 慢速旋转。
+
+6. 地球城市灯光：
+   - 夜侧可见。
+   - 可用单独 night texture 或 shader 根据太阳方向混合。
+
+7. 土星环 / 天王星环：
+   - 使用 RingGeometry。
+   - 使用透明贴图或程序化 radial gradient。
+   - 多层纹理、条纹和透明度变化。
+
+8. 小行星：
+   - 使用 IcosahedronGeometry 或低面数岩石几何。
+   - 通过随机缩放制造不规则形态。
+   - 使用 InstancedMesh 批量渲染。
+
+9. 彗星 / 流星：
+   - 使用线段、粒子拖尾或透明渐变材质。
+```
+
+---
+
+# 十四、推荐代码结构
+
+```text
+请按模块化结构实现，避免把所有逻辑写在一个文件里。
+
+推荐目录：
+
+src/
+  main.ts
+  styles.css
+
+  core/
+    createScene.ts
+    createCamera.ts
+    createRenderer.ts
+    createControls.ts
+    createComposer.ts
+    resize.ts
+
+  data/
+    bodies.ts
+    scale.ts
+    descriptions.ts
+
+  bodies/
+    createSun.ts
+    createPlanet.ts
+    createMoon.ts
+    createRing.ts
+    createOrbitLine.ts
+    createAsteroidBelt.ts
+    createKuiperVeil.ts
+    createComets.ts
+    createStarfield.ts
+
+  materials/
+    sunMaterial.ts
+    planetMaterials.ts
+    earthMaterial.ts
+    atmosphereMaterial.ts
+    ringMaterial.ts
+
+  animation/
+    updateSimulation.ts
+    updateCameraFollow.ts
+    cinematicTour.ts
+    orbitalMath.ts
+
+  ui/
+    createControlPanel.ts
+    updateInfoPanel.ts
+    labels.ts
+    tooltip.ts
+
+  utils/
+    textureLoader.ts
+    proceduralTexture.ts
+    worldToScreen.ts
+    random.ts
+    performance.ts
+```
+
+---
+
+# 十五、核心数据结构
+
+```text
+请使用统一数据结构管理天体。
+
+示例：
+
+type BodyType =
+  | "star"
+  | "planet"
+  | "moon"
+  | "belt";
+
+interface CelestialBodyConfig {
+  id: string;
+  name: string;
+  label: string;
+  type: BodyType;
+
+  parentId?: string;
+
+  radius: number;
+  displayRadius: number;
+
+  orbitRadius: number;
+  orbitSpeed: number;
+  orbitInclination?: number;
+  orbitPhase?: number;
+
+  rotationSpeed: number;
+  axialTilt?: number;
+
+  color?: string;
+  textureUrl?: string;
+
+  hasAtmosphere?: boolean;
+  hasClouds?: boolean;
+  hasNightLights?: boolean;
+
+  ring?: RingConfig;
+  moons?: CelestialBodyConfig[];
+
+  description: string;
+
+  focusDistanceMultiplier?: number;
+}
+
+interface RingConfig {
+  innerRadius: number;
+  outerRadius: number;
+  tilt: number;
+  opacity: number;
+  textureType: "saturn" | "uranus" | "procedural";
+}
+
+interface BeltConfig {
+  id: string;
+  name: string;
+  innerRadius: number;
+  outerRadius: number;
+  count: number;
+  thickness: number;
+  colorRange: string[];
+}
+```
+
+---
+
+# 十六、重点技术要求
+
+```text
+必须做到：
+
+1. 使用 Three.js。
+2. 使用 PerspectiveCamera。
+3. 使用 WebGLRenderer。
+4. 使用 OrbitControls。
+5. 使用 EffectComposer + UnrealBloomPass 或等效 bloom。
+6. 使用 PointLight 从太阳位置照亮场景。
+7. 使用 InstancedMesh 渲染小行星带。
+8. 使用 Points 渲染星场。
+9. 使用 CSS2DRenderer 或 DOM overlay 渲染标签。
+10. 使用 delta time 更新动画。
+11. 不要在 animation loop 里重复创建 geometry、material、texture。
+12. resize 时更新 camera aspect、renderer size、composer size。
+13. 支持移动端降级：
+    - 降低小行星数量。
+    - 降低星点数量。
+    - 降低 bloom 强度。
+    - 降低贴图分辨率。
+14. 有资源加载失败的 fallback。
+15. 没有贴图时用程序化纹理替代。
+16. 代码必须能直接运行。
+```
+
+---
+
+# 十七、镜头复现要求
+
+```text
+请实现以下几个可复现的镜头或状态：
+
+镜头 1：太阳近景
+- 巨大的程序化太阳位于画面中心。
+- 太阳有黄色核心、橙红日冕和 bloom。
+- 附近可看到 Mercury、Venus、Mars 等标签。
+- 小行星带从远处横向穿过画面。
+- 左侧控制面板显示 Sun 介绍。
+
+镜头 2：天王星近景
+- 相机聚焦 Uranus。
+- Uranus 呈淡青白色。
+- 行星接近横躺状态。
+- 有细密、淡蓝灰色环系统。
+- Titania 和 Oberon 在附近可见并带标签。
+- 背景有深空星场。
+
+镜头 3：天王星远景
+- Uranus 位于画面中下部。
+- 太阳和其他行星在远处。
+- 可看到小行星带横向穿过场景。
+- Uranus 的环和卫星仍可辨认。
+
+镜头 4：土星环近景
+- 相机靠近 Saturn 的环系统。
+- 环带占据画面大面积。
+- 环带有密集条纹和透明层次。
+- Enceladus、Titan、Rhea、Iapetus 等卫星带标签。
+- Enceladus 有清晰的半亮半暗相位。
+
+镜头 5：土星系统远景
+- Saturn 带大环位于画面中部。
+- 小行星或深空粒子在前景经过。
+- 背景有星云和星场。
+- 光照方向自然，土星一侧明亮一侧黑暗。
+
+镜头 6：地球夜侧
+- Earth 被聚焦。
+- 有蓝色大气边缘。
+- 有云层。
+- 夜侧可看到城市灯光。
+- Moon 在旁边绕行。
+- 背景可看到 Saturn、Neptune、Asteroid Belt 等远处对象标签。
+
+镜头 7：完整系统结构
+- 相机拉远。
+- 可以看到 Sun、多个行星、小行星带、Kuiper Veil。
+- 行星、卫星、带状结构和标签形成完整空间层级。
+```
+
+---
+
+# 十八、验收标准
+
+```text
+最终交付必须满足以下条件：
+
+视觉：
+- 深黑星空背景存在。
+- 太阳有程序化纹理、日冕和 bloom。
+- 太阳是主光源。
+- 八大行星全部存在。
+- Pluto 也存在。
+- 地球有云层、大气蓝边和夜侧城市灯光。
+- 土星有高细节多层环。
+- 天王星有明显倾斜和淡环。
+- 小行星带清晰可见。
+- Kuiper Veil 清晰可见。
+- 行星和卫星都有标签。
+- 场景有电影感，不像玩具模型。
+
+交互：
+- 左侧控制面板存在。
+- 下拉框可选择所有主要天体、卫星和带状结构。
+- 选择天体后相机平滑聚焦。
+- Cinematic Tour 可用。
+- Deep-Space View 可用。
+- Time scale 滑块可用。
+- Orbits 开关可用。
+- Labels 开关可用。
+- Bloom 开关可用。
+- Pause 开关可用。
+- 鼠标拖拽、缩放、平移可用。
+
+运动：
+- 行星围绕太阳公转。
+- 行星自身自转。
+- 卫星围绕母星公转。
+- 小行星带缓慢旋转。
+- 动画平滑。
+- 聚焦状态下目标仍继续运动。
+- 运动方向和光照方向不能明显错误。
+
+工程：
+- 使用 Three.js。
+- 模块化代码。
+- InstancedMesh 用于小行星。
+- Points 用于星场。
+- 不在动画循环中重复创建资源。
+- 有窗口 resize 处理。
+- 有移动端降级。
+- 无硬编码密钥。
+- 无调试垃圾代码。
+- 项目可直接运行。
+```
+
+---
+
+# 十九、禁止事项
+
+```text
+不要做成 2D 太阳系图。
+不要只做几个纯色球体。
+不要让所有行星大小相同。
+不要让所有轨道间距相同。
+不要让太阳只是普通黄色球。
+不要忽略太阳日冕、bloom 和程序化纹理。
+不要忽略地球云层、大气和夜侧城市灯光。
+不要忽略卫星系统。
+不要忽略小行星带。
+不要忽略 Kuiper Veil。
+不要把土星环做成单一透明圆盘。
+不要把天王星做成普通竖直行星。
+不要让光照方向不来自太阳。
+不要让月球和卫星没有明暗相位。
+不要让标签漂移或遮挡严重。
+不要用大量独立 Mesh 创建小行星。
+不要把所有逻辑写在一个巨大文件里。
+不要让 UI 遮挡主要 3D 画面。
+不要复刻视频播放器字幕、进度条或外部橙红背景；这些是视频包装，不是太阳系应用本体。
+```
+
+---
+
+# 二十、最终整合版 Prompt
+
+如果你只想复制一整段给其他 AI agent，用下面这一版。
+
+```text
+请使用 Three.js 从零实现一个高质量、可交互、电影感的 3D 太阳系可视化系统。目标是复现一个“完全用 Three.js 编码出来的太阳系 WebGL 应用”，而不是普通的静态太阳系模型。
+
+这个系统应包含深黑宇宙背景、多层星场、程序化太阳、太阳日冕、bloom、八大行星、Pluto、主要卫星、土星高细节环、天王星倾斜环、小行星带、Kuiper Veil、彗星、星云、轨道线、标签、自然太阳光照、时间控制、对象聚焦和电影化飞行镜头。
+
+核心视觉：
+- 黑色深空背景，带大量不同大小和亮度的星点。
+- 轻微蓝绿色或紫色星云雾感。
+- 可加入少量彗星或流星拖尾。
+- 太阳位于中心，体积巨大，使用橙黄红程序化等离子体纹理。
+- 太阳外层有黄色 glow、橙红 corona、bloom 和可选 looping prominences。
+- 太阳必须是全场主光源。
+- 行星、卫星、土星环、天王星环都要根据太阳方向产生自然明暗。
+- 不要使用固定方向光随便照亮场景。
+
+必须包含对象：
+Star - Sun；
+Planet - Mercury；
+Planet - Venus；
+Planet - Earth；
+Earth Moon - Moon；
+Planet - Mars；
+Mars Moon - Phobos；
+Mars Moon - Deimos；
+Planet - Jupiter；
+Jupiter Moon - Io；
+Jupiter Moon - Europa；
+Jupiter Moon - Ganymede；
+Jupiter Moon - Callisto；
+Planet - Saturn；
+Saturn Moon - Titan；
+Saturn Moon - Enceladus；
+Saturn Moon - Rhea；
+Saturn Moon - Iapetus；
+Planet - Uranus；
+Uranus Moon - Titania；
+Uranus Moon - Oberon；
+Planet - Neptune；
+Neptune Moon - Triton；
+Planet - Pluto；
+Pluto Moon - Charon；
+Belt - Asteroid Belt；
+Belt - Kuiper Veil。
+
+行星细节：
+- Mercury 是小型灰色岩石行星。
+- Venus 是淡金色或黄白色厚重大气行星。
+- Earth 必须有海洋、陆地、冰盖、动态云层、蓝色大气边缘和夜侧城市灯光。城市灯光只在背向太阳的夜侧出现。
+- Moon 围绕 Earth 公转，并有太阳方向决定的明暗相位。
+- Mars 是红橙色岩石行星，有 Phobos 和 Deimos。
+- Jupiter 是巨大条纹气态行星，可带大红斑，有 Io、Europa、Ganymede、Callisto。
+- Saturn 是土黄色气态行星，有巨大倾斜、多层、细密纹理的透明环带，有 Titan、Enceladus、Rhea、Iapetus。环带不能是单一圆盘，要有条纹、透明度变化和光照明暗。
+- Uranus 是淡青色冰巨星，几乎横躺，轴倾角接近 90 度，有淡蓝灰色细密环系统，有 Titania 和 Oberon。
+- Neptune 是深蓝色冰巨星，有 Triton。
+- Pluto 是远距离小型矮行星，有 Charon。
+
+带状结构：
+- Asteroid Belt 位于 Mars 和 Jupiter 之间，由至少 1000 个不规则小岩石组成。
+- 小行星带必须使用 InstancedMesh，不能为每个小行星创建独立 Mesh。
+- 小行星应有随机半径、角度、高度偏移、旋转、缩放、材质亮度和自转速度。
+- 近看小行星应像不规则岩石块，远看形成横向白色碎石带。
+- Kuiper Veil 位于 Neptune / Pluto 外侧，更远、更暗、更稀疏，可以使用 Points 或 InstancedMesh，有标签。
+
+运动系统：
+- 所有行星围绕太阳公转并自身自转。
+- 所有卫星围绕母星公转。
+- 母星移动时卫星系统要跟随母星整体移动。
+- 小行星带和 Kuiper Veil 可缓慢旋转。
+- 使用 Object3D 层级结构管理嵌套轨道。
+- 使用 requestAnimationFrame 和 THREE.Clock delta time 更新动画。
+- 动画必须平滑，不能像静态球体随机漂浮。
+- 聚焦天体时，天体仍继续运动。
+
+比例：
+- 不要求天文绝对真实比例，因为真实比例会导致画面不可读。
+- 但比例必须感觉可信：太阳最大，木星和土星明显大于内行星，内行星更靠近太阳，外行星更远，小行星带在 Mars 和 Jupiter 之间，Kuiper Veil 在 Neptune / Pluto 外侧。
+- 行星尺寸可以适度夸张，距离可以压缩，但空间层级必须清晰。
+
+轨道线：
+- 每个行星有细、暗、半透明轨道线。
+- 卫星也可以有局部轨道线。
+- 轨道线颜色使用深蓝灰、淡白或浅青色，不要强霓虹。
+- 轨道可有轻微倾角。
+- UI 可开关轨道显示。
+
+标签系统：
+- 所有主要天体有小型深色圆角 pill 标签。
+- 标签背景为半透明深蓝灰或黑灰，文字为浅灰白。
+- 标签始终面向屏幕，并随天体移动。
+- 使用 CSS2DRenderer、CSS3DRenderer 或 DOM overlay，把 3D 世界坐标投影到 2D 屏幕坐标。
+- UI 可开关标签显示。
+- 远处小天体标签可只在聚焦或 hover 时显示。
+
+左侧 UI 控制面板：
+- 固定在画面左上侧。
+- 深蓝黑半透明玻璃拟态背景。
+- 圆角、细边框、轻微阴影。
+- 标题为 SOLAR SYSTEM。
+- 副标题为：Procedural worlds, rings, clouds, city lights, asteroid fields, nebulae, comets, and focus-mode flyovers.
+- 有对象选择下拉框，包含所有 Star、Planet、Moon、Belt 对象，以及 Free flight / manual camera。
+- 有两个按钮：Cinematic Tour、Deep-Space View。
+- 有 Time scale 滑块，并显示当前倍率，例如 1.0x。
+- 有复选框：Orbits、Labels、Bloom、Pause。
+- 有动态信息卡片，根据当前选中天体显示名称和说明。
+
+信息卡片示例：
+Sun:
+A living procedural star: layered plasma texture, additive corona, looping prominences, and bloom-heavy lens glow. The light source for the whole scene sits at its core.
+
+Earth:
+Oceans, continents, ice caps, live cloud layer, blue atmospheric rim, and city lights that appear only on the night side.
+
+Uranus:
+An ice giant tilted almost sideways, with pale cyan bands and a delicate faint ring system.
+
+Enceladus:
+A bright icy moon with blue-white cracks, tucked near Saturn's rings.
+
+相机交互：
+- 使用 OrbitControls。
+- 用户可以拖拽旋转、滚轮缩放、平移。
+- 点击标签、点击天体或从下拉框选择天体后，相机平滑飞行到该天体附近。
+- 聚焦时相机继续跟随该天体运动。
+- 选择 Free flight / manual camera 后取消跟随。
+- Cinematic Tour 启动自动镜头：太阳近景、内行星、小行星带、木星系统、土星环、天王星环、远景总览。
+- Deep-Space View 将相机拉远，展示太阳、行星、小行星带、Kuiper Veil 和星场整体结构。
+- 相机飞行必须平滑，不要瞬间跳转。
+- 聚焦不同尺度对象时，相机距离自动适配。
+
+底部提示条：
+- 在画面右下方或底部添加半透明提示条。
+- 内容示例：Click a planet or moon to focus it. Drag to orbit, scroll to zoom. Try Earth at night, Saturn's rings, Jupiter's storms, and the asteroid belt.
+- 深色半透明背景，圆角，小号浅色文字，不遮挡主体。
+
+技术栈（严格锁定，不得替换）：
+- three@0.160.0（package.json 中版本写死，不用 ^ 或 ~）
+- vite@^5.4
+- 纯 JavaScript（.js 文件），不使用 TypeScript
+- 所有 Three.js addons 通过 `three/addons/...` 官方路径导入，示例：
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+- PerspectiveCamera / WebGLRenderer / PointLight / InstancedMesh / Points / ShaderMaterial / CanvasTexture
+- 相机飞行 tween 可选用 gsap@^3.12 或自写 easing，不得引入其他 tween 库
+- UI 用原生 DOM + CSS，不用 React / Vue / dat.gui / Tweakpane
+- 动画用 requestAnimationFrame + THREE.Clock delta time
+
+目录结构（固定，所有文件均为 .js）：
+项目根 D:\AI\codex-Project\claude-threejs-sun\
+  index.html
+  package.json
+  vite.config.js
+  README.md
+  .gitignore
+  src/
+    main.js
+    styles.css
+    core/
+      createScene.js
+      createCamera.js
+      createRenderer.js
+      createControls.js
+      createComposer.js
+      resize.js
+    data/
+      bodies.js
+      scale.js
+      descriptions.js
+    bodies/
+      createSun.js
+      createPlanet.js
+      createMoon.js
+      createRing.js
+      createOrbitLine.js
+      createAsteroidBelt.js
+      createKuiperVeil.js
+      createComets.js
+      createStarfield.js
+    materials/
+      sunMaterial.js
+      planetMaterials.js
+      earthMaterial.js
+      atmosphereMaterial.js
+      ringMaterial.js
+    animation/
+      updateSimulation.js
+      updateCameraFollow.js
+      cinematicTour.js
+      orbitalMath.js
+    ui/
+      createControlPanel.js
+      updateInfoPanel.js
+      labels.js
+      tooltip.js
+    utils/
+      proceduralTexture.js
+      worldToScreen.js
+      random.js
+      performance.js
+
+截图复现的关键构图细节（以下 7 条为硬性视觉要求，来源于 图片/ 目录下 13 张截图）：
+
+1. 聚焦镜头不是"特写"，而是"主体 + 背景共存"：
+   - 聚焦某天体后，该天体占画面 30%–50%，但其他行星和标签仍应出现在画面边缘。
+   - 不要把相机推到几乎贴脸的位置，也不要把视场窄到完全看不到旁边的天体。
+   - 参考图：4a371fb3-*（天王星聚焦时仍能看到顶部木土星一排）、946a35b8-*（天王星聚焦时背景有 Mercury/Venus/Earth/Jupiter/Saturn 一字排开）。
+
+2. Deep-Space View 的具体构图：
+   - 相机位于黄道面附近（略微抬高 15°–25°），行星近似一字排开。
+   - 从画面右侧太阳位置向左延伸，依次经过 Mercury、Venus、Earth、Mars、Asteroid Belt、Jupiter、Saturn、Uranus、Neptune、Pluto、Kuiper Veil。
+   - 所有主要天体的标签必须同时在画面内可读，小行星带呈横向白色碎石带穿过画面。
+   - 不要采用高角度俯视（会破坏"一字排开"的可读性）。
+   - 参考图：b18b2f6c-*。
+
+3. 土星环的细节强度：
+   - 环面必须肉眼可辨至少 3–4 条主环（对应 A 环、B 环、C 环）以及一条暗缝（Cassini gap）。
+   - 实现方式：RingGeometry + 自定义 shader 或 CanvasTexture 生成径向条纹（alpha / brightness 随半径呈多带状变化，而不是单一 radial gradient）。
+   - 土星本体必须投射阴影到环面（或通过 shader 近似：环上靠近本体背光侧的扇形区域变暗）。
+   - 土星本体基础色必须是土黄/米黄（#d8b87a 附近），不要因为 bloom 过强看起来纯白（控制 bloom threshold）。
+   - 参考图：797fa690-*、893d85df-*、c89cbc9a-*。
+
+4. 天王星的姿态与环：
+   - 轴倾角 97.77°，即接近"躺着自转"。环面法向近似水平。
+   - 从黄道面方向观察时，天王星的环看起来是近似"正圆正对镜头"（从上方俯视才看得到扁椭圆）。
+   - 环为淡蓝灰色，非常纤细，多层但不抢戏，透明度明显低于土星环。
+   - Titania 和 Oberon 在环的两侧，近距离观察时清晰可见并带标签。
+   - 参考图：5c26653f-*、6dc6d358-*、c89cbc9a-*。
+
+5. 太阳的多层视觉结构：
+   - 从内到外至少 4 层：核心实体球（程序化等离子体纹理，含暗色对流胞/黑子斑块）→ 第一层 corona（黄白）→ 第二层 corona（橙）→ 第三层 corona（深橙红）。
+   - 每一层 corona 使用 additive blending 的 Sprite 或球壳 mesh，半径递增，alpha 递减。
+   - 表面纹理必须有流动感（uniform time 驱动 fbm noise），而不是静态贴图。
+   - 可选：2–3 条围绕赤道附近的 looping prominence 弧（淡红色弯曲管状结构，非必需但加分）。
+   - UnrealBloomPass threshold 约 0.3–0.5、strength 1.2–1.8，让太阳发光但不让土星/地球烧白。
+   - 参考图：e40f288f-*。
+
+6. UI 颜色规范（与截图一致）：
+   - 控制面板背景：`rgba(12, 18, 34, 0.82)`，细边框 `rgba(125, 160, 255, 0.18)`。
+   - 面板标题 "SOLAR SYSTEM"：浅灰白（#e8eeff），letter-spacing 加强。
+   - 副标题文字：#9fb0d0 左右的淡灰蓝。
+   - 下拉框当前选中项的高亮背景：**橙黄色** `#ffa64d` 级别，文字变为深色。
+   - 信息卡标题（如 "Uranus"、"Earth"、"Sun"）：**橙黄色** `#ffcc76` 或 `#ffb86b`。
+   - 信息卡描述文字：淡灰 #b8c2d8。
+   - 两个按钮（Cinematic Tour / Deep-Space View）：深色胶囊，细亮边 `rgba(150, 190, 255, 0.22)`。
+   - Time scale 滑块：轨道为细暗灰条，已填充部分为淡青色 `#7bd4ff`，右侧显示 `1.0x` 等倍率文字。
+   - 复选框（Orbits/Labels/Bloom/Pause）：打勾时为橙黄色勾选框 + 淡灰标签文字。
+
+7. 标签显示策略：
+   - 全部天体默认显示标签，但"远处小天体"（距离相机 > 某阈值、投影尺寸 < 某像素）时自动淡出或隐藏，避免画面被挤满。
+   - 标签样式：`padding: 4px 10px; border-radius: 999px; background: rgba(10, 14, 28, 0.72); color: #d8e0f0; font-size: 12px; letter-spacing: 0.04em;` 附带 1px 亮边。
+   - 标签位置在天体上方或右上方（根据相机视角自动），不要遮挡天体本体。
+
+工程执行硬约束（以下 5 条为交付前必须满足）：
+
+A. `package.json` 中依赖版本固定：
+   ```
+   "dependencies": { "three": "0.160.0" }
+   "devDependencies": { "vite": "^5.4.0" }
+   ```
+   不要出现 `^0.160` 或 `latest`。
+
+B. 所有贴图/纹理必须程序化生成，禁止以下行为：
+   - 在代码中出现任何 http:// 或 https:// 开头的图片 URL。
+   - 使用 `new THREE.TextureLoader().load('...')` 加载外部或本地图片文件。
+   - 引用其他项目目录（如 `D:\AI\codex-Project\SVG图像生成\`）下的贴图。
+   - 允许的例外：程序化 CanvasTexture（由 `document.createElement('canvas')` + 绘制代码生成）。
+
+C. 打包产物可部署：
+   - `vite.config.js` 中 `base: './'`。
+   - `npm run build` 成功产出 `dist/`，`dist/index.html` 可直接用浏览器打开（双击即可显示），不依赖外网。
+
+D. 代码质量：
+   - 不在 animation loop（`renderer.setAnimationLoop` 或 `requestAnimationFrame` 回调）内创建 Geometry、Material、Texture、Vector3（除非是 pooled 或临时 Vector 用于计算）。
+   - window resize 事件同时更新 camera.aspect、renderer.setSize、composer.setSize、labelRenderer.setSize。
+   - 所有异步资源（如 texture 生成）有 fallback：失败时用纯色 MeshBasicMaterial 替代，场景不能崩。
+   - 无 `console.log` 调试输出（除非是明确的加载进度或错误上报）。
+   - 无 TODO / FIXME / 占位字符串。
+
+E. 交付完整性：
+   - `npm install` 后 `npm run dev` 必须可启动，打开浏览器端口（默认 5173）即看到完整太阳系场景。
+   - `npm run build` 必须零错误通过。
+   - README.md 包含：项目简介、技术栈、启动命令（npm + pnpm 两种）、构建命令、目录结构、主要模块说明、已知限制（如果有）。
+
+验收标准：
+- 页面可直接运行。
+- 左侧控制面板完整。
+- 下拉框可选择太阳、行星、卫星、小行星带、Kuiper Veil。
+- 太阳有程序化纹理、日冕、bloom，并作为主光源。
+- 八大行星、Pluto 和主要卫星存在。
+- Earth 有云层、大气蓝边和夜侧城市灯光。
+- Saturn 有高细节多层环和多个卫星。
+- Uranus 有明显横躺姿态、淡环、Titania 和 Oberon。
+- Asteroid Belt 清晰可见且使用 InstancedMesh。
+- Kuiper Veil 存在。
+- 标签系统可用。
+- 轨道线可开关。
+- Bloom 可开关。
+- Pause 可用。
+- Time scale 可调。
+- Cinematic Tour 可用。
+- Deep-Space View 可用。
+- 相机可自由控制并可平滑聚焦天体。
+- 行星和卫星运动平滑。
+- 光照方向来自太阳，昼夜分界自然。
+- 移动端有性能降级。
+- 代码模块化，无调试垃圾代码，无硬编码密钥。
+
+禁止：
+- 不要做 2D 平面图。
+- 不要只做纯色球。
+- 不要让所有行星尺寸相同。
+- 不要让太阳只是普通黄色球。
+- 不要忽略地球云层、大气和夜侧城市灯光。
+- 不要忽略土星环细节。
+- 不要忽略天王星横躺姿态。
+- 不要忽略主要卫星。
+- 不要忽略小行星带和 Kuiper Veil。
+- 不要用大量独立 Mesh 创建小行星。
+- 不要让标签漂移或遮挡严重。
+- 不要把所有逻辑写进一个巨大文件。
+- 不要复刻视频播放器字幕、进度条或外部橙红背景；核心目标是复现太阳系 WebGL 应用本体。
+```
+
+---
+
+# 我建议你采用 v3 的原因
+
+这批截图说明原视频展示的亮点不是“太阳系模型”，而是：
+
+> **一个带 UI、带聚焦、带程序化材质、带光照推理、带多层天体系统的 Three.js 交互作品。**
+
+所以最终 prompt 必须强调：
+
+1. **左侧控制台 UI**
+2. **可选择具体星体 / 卫星 / 带状结构**
+3. **太阳程序化 shader 与 bloom**
+4. **地球云层、大气、城市灯光**
+5. **土星环和天王星环的细节**
+6. **所有主要卫星标签与聚焦**
+7. **小行星带和 Kuiper Veil**
+8. **自然太阳光方向**
+9. **电影化相机飞行**
+10. **完整工程结构**
+
+上一版 v2 更像“高级太阳系模拟系统”。
+这版 v3 更接近你截图中的目标：**完整 Three.js 太阳系可视化应用**。
+
+---
+
+# 二十一、交付清单（必须产出的全部文件）
+
+```text
+项目根目录：D:\AI\codex-Project\claude-threejs-sun\
+
+必须存在的文件（缺一不算完成）：
+
+1. index.html
+   - 作为 Vite 入口 HTML，包含 <div id="app"></div>、<div id="ui"></div> 等挂载点。
+   - <script type="module" src="/src/main.js"></script>
+   - <title>Solar System</title>
+   - charset utf-8，viewport meta，dark theme background。
+
+2. package.json
+   - name: "claude-threejs-sun"
+   - private: true
+   - type: "module"
+   - scripts: dev / build / preview
+   - dependencies: { "three": "0.160.0" }
+   - devDependencies: { "vite": "^5.4.0" }
+   - 如果使用 GSAP，加入 "gsap": "^3.12.0"，否则不加。
+
+3. vite.config.js
+   - export default defineConfig({ base: './', server: { port: 5173 } })
+
+4. README.md
+   - 包含：项目简介 / 预览截图位置（指向 图片/ 目录）/ 技术栈 / 启动命令 / 构建命令 / 目录结构 / 主要模块说明 / 操作提示（与底部提示条文案一致）/ 已知限制。
+
+5. .gitignore
+   - 至少包含：node_modules / dist / .vite / *.log
+
+6. src/ 下所有文件
+   - 完整实现前述目录结构的全部 .js 文件，每个文件有清晰单一职责，默认导出或命名导出。
+   - 禁止空文件或"待实现"的占位。
+
+交付前清理：
+
+- 所有执行过程中产生的临时文件（例如 test.html / debug.js / scratch/）必须删除或归类到 `trash/` 目录并在 README 中注明。
+- package-lock.json、pnpm-lock.yaml、yarn.lock 保留其中一种即可（根据实际使用的包管理器）。
+- 不产生 node_modules 之外的任何依赖目录。
+- `图片/` 和 `prompt.txt` 保持原样不动。
+```
+
+---
+
+# 二十二、执行检查点（自检清单，提交前逐条核对）
+
+```text
+运行层面：
+
+[ ] 在项目根目录执行 `npm install` 零错误完成。
+[ ] 执行 `npm run dev`，终端输出 Vite 启动成功，浏览器打开 http://localhost:5173 能看到完整太阳系场景，不是空白或错误页。
+[ ] 执行 `npm run build`，零错误产出 dist/ 目录，dist/index.html 可直接双击用浏览器打开并看到场景。
+[ ] 打开浏览器开发者工具，Console 无红色错误（Warning 可以接受但应尽量少）。
+
+视觉层面（与 图片/ 目录下截图对照）：
+
+[ ] 太阳为多层结构（核心 + 至少 3 层 corona），表面流动、有 bloom，看上去像截图 e40f288f 的效果。
+[ ] 地球有海陆分布、云层、蓝色大气边、夜侧城市灯光，昼夜分界自然。
+[ ] 土星环肉眼可辨至少 3–4 条径向条纹 + 1 条暗缝，土星本体是土黄色不是纯白。
+[ ] 天王星几乎横躺，环面正对相机时呈近圆形，Titania 和 Oberon 在旁并带标签。
+[ ] 木星有条纹云带，可选大红斑，4 颗伽利略卫星全齐。
+[ ] 小行星带使用 InstancedMesh，肉眼可见至少 1000 个岩石实例。
+[ ] Kuiper Veil 存在，比小行星带更远更稀疏。
+[ ] 彗星或流星存在（至少 1–2 条）。
+[ ] 星场多层，深空背景不是纯黑而是有极淡的星云氛围。
+
+交互层面：
+
+[ ] 左侧面板完整：标题 / 副标题 / 下拉框 / 两个按钮 / Time scale / 4 个复选框 / 信息卡。
+[ ] 下拉框包含全部 26+ 个对象（从 Star - Sun 到 Belt - Kuiper Veil 全齐），选中项橙黄高亮。
+[ ] 选择任意对象，相机平滑飞行到该对象并跟随；选择 Free flight 取消跟随。
+[ ] Cinematic Tour 按钮点击后自动巡游，7 个镜头依次执行，结束后回到 Free flight。
+[ ] Deep-Space View 按钮点击后相机移到黄道面略上方，行星一字排开，所有标签可读。
+[ ] Time scale 滑块可调 0x–100x，右侧显示当前倍率。
+[ ] Orbits / Labels / Bloom / Pause 四个开关均可立即生效。
+[ ] 拖拽旋转、滚轮缩放、右键平移（OrbitControls 默认）均可用。
+
+工程层面：
+
+[ ] 全部源码是 .js（无 .ts 文件）。
+[ ] three 版本严格等于 0.160.0。
+[ ] 所有 addons 来自 `three/addons/...` 路径（不从 `three/examples/jsm/...` 导入，也不从 CDN 导入）。
+[ ] 无 http:// 或 https:// 开头的图片 URL；无 TextureLoader().load() 调用外部文件。
+[ ] animation loop 内无 new Geometry/Material/Texture。
+[ ] window resize 事件同步更新 camera / renderer / composer / labelRenderer。
+[ ] console 无调试 log / TODO / FIXME / 占位字符串。
+[ ] README.md 完整且可跟随操作。
+[ ] `图片/` 目录和 prompt.txt 未被修改。
+
+结构合规：
+
+[ ] 项目根路径为 D:\AI\codex-Project\claude-threejs-sun\。
+[ ] 目录结构与第二十节"目录结构"段完全一致。
+[ ] 无临时文件残留，若有归入 trash/ 并在 README 列出。
+
+只有全部打勾才算完成。如果某项无法完成，在 README.md 末尾"已知限制"部分明确说明原因，而不是静默忽略。
+```
