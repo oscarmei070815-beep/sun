@@ -229,18 +229,18 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'sun-close',
     duration: 7,
-    targetId: 'Star - Sun',
+    targetId: 'sun',
     distanceMultiplier: 10.8,
     frameOffsetX: 0.14,
     viewDirection: new THREE.Vector3(0.78, 0.26, 0.56),
     from: {
-      targetId: 'Star - Sun',
+      targetId: 'sun',
       distanceMultiplier: 12.4,
       frameOffsetX: 0.12,
       viewDirection: new THREE.Vector3(0.72, 0.28, 0.62),
     },
     to: {
-      targetId: 'Star - Sun',
+      targetId: 'sun',
       distanceMultiplier: 9.8,
       frameOffsetX: 0.16,
       viewDirection: new THREE.Vector3(0.84, 0.24, 0.5),
@@ -249,18 +249,18 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'inner-planets-pass',
     duration: 8,
-    targetIds: ['Planet - Mercury', 'Planet - Venus', 'Planet - Earth', 'Planet - Mars'],
+    targetIds: ['mercury', 'venus', 'earth', 'mars'],
     distanceMultiplier: 11.5,
     frameOffsetX: 0.12,
     viewDirection: new THREE.Vector3(0.86, 0.18, 0.5),
     from: {
-      targetIds: ['Planet - Mercury', 'Planet - Venus'],
+      targetIds: ['mercury', 'venus'],
       distanceMultiplier: 10.5,
       frameOffsetX: 0.1,
       viewDirection: new THREE.Vector3(0.9, 0.16, 0.4),
     },
     to: {
-      targetIds: ['Planet - Earth', 'Planet - Mars'],
+      targetIds: ['earth', 'mars'],
       distanceMultiplier: 12.2,
       frameOffsetX: 0.14,
       viewDirection: new THREE.Vector3(0.8, 0.2, 0.56),
@@ -269,18 +269,18 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'asteroid-belt',
     duration: 7,
-    targetId: 'Belt - Asteroid Belt',
+    targetId: 'asteroidBelt',
     distanceMultiplier: 6.6,
     frameOffsetX: 0.12,
     viewDirection: new THREE.Vector3(0.9, 0.14, 0.42),
     from: {
-      targetId: 'Belt - Asteroid Belt',
+      targetId: 'asteroidBelt',
       distanceMultiplier: 7.4,
       frameOffsetX: 0.1,
       viewDirection: new THREE.Vector3(0.92, 0.12, 0.36),
     },
     to: {
-      targetId: 'Belt - Asteroid Belt',
+      targetId: 'asteroidBelt',
       distanceMultiplier: 6,
       frameOffsetX: 0.14,
       viewDirection: new THREE.Vector3(0.86, 0.16, 0.48),
@@ -289,16 +289,16 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'jupiter-system',
     duration: 8,
-    targetId: 'Planet - Jupiter',
+    targetId: 'jupiter',
     distanceMultiplier: 10.6,
     viewDirection: new THREE.Vector3(0.8, 0.2, 0.54),
     from: {
-      targetId: 'Planet - Jupiter',
+      targetId: 'jupiter',
       distanceMultiplier: 11.8,
       viewDirection: new THREE.Vector3(0.82, 0.18, 0.48),
     },
     to: {
-      targetId: 'Planet - Jupiter',
+      targetId: 'jupiter',
       distanceMultiplier: 9.8,
       viewDirection: new THREE.Vector3(0.76, 0.22, 0.58),
     },
@@ -306,16 +306,16 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'saturn-rings',
     duration: 8,
-    targetId: 'Planet - Saturn',
+    targetId: 'saturn',
     distanceMultiplier: 11.4,
     viewDirection: new THREE.Vector3(0.72, 0.2, 0.66),
     from: {
-      targetId: 'Planet - Saturn',
+      targetId: 'saturn',
       distanceMultiplier: 12.6,
       viewDirection: new THREE.Vector3(0.78, 0.2, 0.56),
     },
     to: {
-      targetId: 'Planet - Saturn',
+      targetId: 'saturn',
       distanceMultiplier: 10.2,
       viewDirection: new THREE.Vector3(0.66, 0.22, 0.72),
     },
@@ -323,16 +323,16 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
   makeShot({
     id: 'uranus-ring',
     duration: 8,
-    targetId: 'Planet - Uranus',
+    targetId: 'uranus',
     distanceMultiplier: 9.6,
     viewDirection: new THREE.Vector3(0.96, 0.16, 0.16),
     from: {
-      targetId: 'Planet - Uranus',
+      targetId: 'uranus',
       distanceMultiplier: 10.7,
       viewDirection: new THREE.Vector3(0.98, 0.14, 0.08),
     },
     to: {
-      targetId: 'Planet - Uranus',
+      targetId: 'uranus',
       distanceMultiplier: 9.0,
       viewDirection: new THREE.Vector3(0.92, 0.18, 0.24),
     },
@@ -363,7 +363,7 @@ export const DEFAULT_CINEMATIC_SHOTS = Object.freeze([
       deepSpacePose.up.copy(closePose.up).lerp(deepSpacePose.up, blend);
       deepSpacePose.distance = closePose.distance + (deepSpacePose.distance - closePose.distance) * blend;
       deepSpacePose.mode = 'deep-space';
-      deepSpacePose.followTargetId = deepSpacePose.followTargetId || 'Star - Sun';
+      deepSpacePose.followTargetId = deepSpacePose.followTargetId || 'sun';
       return deepSpacePose;
     },
   }),

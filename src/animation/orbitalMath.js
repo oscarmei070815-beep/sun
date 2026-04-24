@@ -511,7 +511,7 @@ export function buildDeepSpaceViewPose(input = {}, context = {}, out = createPos
     params.fov ?? DEFAULT_DEEP_SPACE_VIEW.fov,
     params.minFov ?? DEFAULT_DEEP_SPACE_VIEW.minFov,
   );
-  out.followTargetId = bounds.sunId ?? context.sunId ?? 'Star - Sun';
+  out.followTargetId = bounds.sunId ?? context.sunId ?? 'sun';
   out.mode = params.mode ?? 'deep-space';
   out.keepFollowing = false;
   return out;

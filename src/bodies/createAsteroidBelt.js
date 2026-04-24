@@ -2,10 +2,33 @@ import * as THREE from 'three';
 
 const transformHelper = new THREE.Object3D();
 const tempColor = new THREE.Color();
+let dustSpriteTexture = null;
 
 function gaussian(value, center, spread) {
   const distance = (value - center) / spread;
   return Math.exp(-(distance * distance));
+}
+
+function getDustSpriteTexture() {
+  if (dustSpriteTexture || typeof document === 'undefined') {
+    return dustSpriteTexture;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 48;
+  canvas.height = 48;
+  const context = canvas.getContext('2d');
+  const gradient = context.createRadialGradient(24, 24, 1, 24, 24, 24);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  gradient.addColorStop(0.42, 'rgba(255, 255, 255, 0.88)');
+  gradient.addColorStop(0.78, 'rgba(255, 255, 255, 0.24)');
+  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 48, 48);
+
+  dustSpriteTexture = new THREE.CanvasTexture(canvas);
+  dustSpriteTexture.needsUpdate = true;
+  return dustSpriteTexture;
 }
 
 export function createAsteroidBelt(config, options = {}) {
@@ -76,20 +99,25 @@ export function createAsteroidBelt(config, options = {}) {
   const pointCloud = new THREE.Points(
     pointGeometry,
     new THREE.PointsMaterial({
-      size: 0.72,
+      size: 0.58,
       color: '#fff2d7',
+      map: getDustSpriteTexture(),
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.62,
+      alphaTest: 0.04,
       depthWrite: false,
       sizeAttenuation: true
     })
   );
 
   const root = new THREE.Group();
+  const focusAnchor = new THREE.Object3D();
   const labelAnchor = new THREE.Object3D();
-  labelAnchor.position.set(config.orbitRadius + 6, config.thickness * 0.3, 0);
-  root.add(labelAnchor);
+  const bandRadius = (config.innerRadius + config.outerRadius) * 0.5;
+  focusAnchor.position.set(bandRadius, config.thickness * 0.16, 0);
+  labelAnchor.position.set(config.outerRadius + 6, config.thickness * 0.3, 0);
+  root.add(focusAnchor, labelAnchor);
   root.add(pointCloud, mesh);
 
   function update(delta, elapsed) {
@@ -136,14 +164,18 @@ export function createAsteroidBelt(config, options = {}) {
     type: config.type,
     name: config.name,
     label: config.label,
+    displayRadius: config.focusDisplayRadius ?? Math.max(config.thickness * 1.7, 10),
+    orbitEnabled: false,
+    spinEnabled: false,
     root,
-    object3d: labelAnchor,
+    object3d: focusAnchor,
     orbitPivot: root,
     translationGroup: root,
     meshGroup: root,
     mesh,
     labelAnchor,
-    focusTarget: labelAnchor,
+    focusAnchor,
+    focusTarget: focusAnchor,
     orbitLine: null,
     update
   };

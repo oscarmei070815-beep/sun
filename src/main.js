@@ -240,7 +240,7 @@ const systemBounds = {
   bodies: rootBodies,
   center: sunBody,
   sunPosition: sunBody,
-  sunId: 'Star - Sun',
+  sunId: 'sun',
   systemRadius: estimateSystemRadius(rootBodies, 320),
   deepSpaceView: {
     distanceMultiplier: 0.96,
@@ -278,7 +278,7 @@ function getAnimationContext() {
     bodyMap: bodyAliasMap,
     systemBounds,
     sunPosition: sunBody,
-    sunId: 'Star - Sun',
+    sunId: 'sun',
     center: sunBody,
     target: controls.target,
     up: camera.up,
@@ -337,6 +337,14 @@ const DEEP_SPACE_LABEL_OFFSETS = {
   kuiperVeil: new THREE.Vector3(44, -18, 0)
 };
 
+function isInspectionMode(mode) {
+  return mode === 'focus' || mode === 'inspect';
+}
+
+function isInspectableBelt(body) {
+  return body?.config?.type === 'belt' || body?.type === 'belt';
+}
+
 function getBodyContextIds(targetId) {
   const ids = new Set();
   const target = bodyInstances.get(targetId);
@@ -364,7 +372,7 @@ function getBodyContextIds(targetId) {
 
 function configureLabelsForMode(mode) {
   const focusContextIds =
-    mode === 'focus' && cameraFollowState.targetId
+    isInspectionMode(mode) && cameraFollowState.targetId
       ? getBodyContextIds(cameraFollowState.targetId)
       : null;
 
@@ -399,7 +407,7 @@ function configureLabelsForMode(mode) {
       continue;
     }
 
-    if (mode === 'focus' && focusContextIds) {
+    if (isInspectionMode(mode) && focusContextIds) {
       labelManager.setLabelState(id, {
         ...profileConfig,
         alwaysVisible: false,
@@ -428,7 +436,7 @@ function updateOrbitPresentation() {
     return;
   }
 
-  if (cameraFollowState.mode !== 'focus' || !cameraFollowState.targetId) {
+  if (!isInspectionMode(cameraFollowState.mode) || !cameraFollowState.targetId) {
     updateOrbitVisibility(true);
     return;
   }
@@ -452,7 +460,7 @@ function updateOrbitPresentation() {
 }
 
 function updateBodyPresentation() {
-  if (cameraFollowState.mode !== 'focus' || !cameraFollowState.targetId) {
+  if (!isInspectionMode(cameraFollowState.mode) || !cameraFollowState.targetId) {
     for (const body of bodyInstances.values()) {
       body.root.visible = true;
     }
@@ -467,7 +475,7 @@ function updateBodyPresentation() {
 
 function updateFocusLighting(delta) {
   const targetBody =
-    cameraFollowState.mode === 'focus' && cameraFollowState.targetId
+    isInspectionMode(cameraFollowState.mode) && cameraFollowState.targetId
       ? bodyInstances.get(cameraFollowState.targetId)
       : null;
 
@@ -584,6 +592,25 @@ function focusObject(id, options = {}) {
   }
 }
 
+function releaseInspectableBeltCamera() {
+  const targetBody = cameraFollowState.targetId
+    ? bodyInstances.get(cameraFollowState.targetId)
+    : null;
+
+  if (
+    cameraFollowState.mode !== 'focus' ||
+    !isInspectableBelt(targetBody) ||
+    cameraFollowState.followTransition?.active
+  ) {
+    return false;
+  }
+
+  cameraFollowState.mode = 'inspect';
+  cameraFollowState.target = null;
+  controls.enabled = true;
+  return true;
+}
+
 function activateDeepSpace(options = {}) {
   stopCinematicTour(cinematicTourState);
   requestCameraFocus(
@@ -690,6 +717,18 @@ controls.addEventListener('start', () => {
     stopCinematicTour(cinematicTourState);
     cameraFollowState.mode = 'free';
   }
+
+  if (cameraFollowState.targetId) {
+    const targetBody = bodyInstances.get(cameraFollowState.targetId);
+    if (isInspectableBelt(targetBody)) {
+      if (cameraFollowState.followTransition) {
+        cameraFollowState.followTransition.active = false;
+      }
+      cameraFollowState.mode = 'inspect';
+      cameraFollowState.target = null;
+      controls.enabled = true;
+    }
+  }
 });
 
 const initialPose = buildDeepSpaceTourPose(getAnimationContext());
@@ -753,6 +792,7 @@ function tick() {
     }
   } else {
     updateCameraFollow(cameraFollowState, delta, getAnimationContext());
+    releaseInspectableBeltCamera();
 
     if (cinematicTourState.completed) {
       cinematicTourState.completed = false;
