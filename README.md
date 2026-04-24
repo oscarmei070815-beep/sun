@@ -2,6 +2,10 @@
 
 一个基于 `Three.js 0.160.0` 和 `Vite 5` 的纯 JavaScript 太阳系可视化项目。场景包含程序化太阳、八大行星、冥王星、主要卫星、土星环、天王星环、小行星带、Kuiper Veil、标签系统、时间控制、Deep-Space 总览和 Cinematic Tour 巡游镜头。
 
+## 在线预览
+
+- GitHub Pages: https://oscarmei070815-beep.github.io/sun/
+
 ## 预览参考
 
 - 截图参考目录：`./图片/`
