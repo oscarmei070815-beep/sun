@@ -245,7 +245,22 @@ export function createControlPanel({
   const shell = document.createElement('section');
   shell.className = 'solar-ui-shell';
 
+  const mobileQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 720px)')
+    : null;
+  let panelCollapsed = Boolean(mobileQuery?.matches);
+
+  const panelToggle = document.createElement('button');
+  panelToggle.type = 'button';
+  panelToggle.className = 'solar-panel-toggle';
+  panelToggle.setAttribute('aria-controls', 'solar-control-panel');
+  panelToggle.innerHTML = `
+    <span class="solar-panel-toggle__icon" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="solar-panel-toggle__label">控制</span>
+  `;
+
   const panel = document.createElement('div');
+  panel.id = 'solar-control-panel';
   panel.className = 'solar-control-panel';
 
   const body = document.createElement('div');
@@ -267,6 +282,7 @@ export function createControlPanel({
     state.selectedId = value;
     infoCard && updateInfoPanel(infoCard, getInfoEntry(value));
     emit('selection', value, 'dropdown');
+    collapseForMobile();
   });
   targetGroup.append(targetLabel, dropdown.root);
 
@@ -276,13 +292,19 @@ export function createControlPanel({
   cinematicButton.type = 'button';
   cinematicButton.className = 'solar-button solar-button--primary';
   cinematicButton.textContent = '电影巡游';
-  cinematicButton.addEventListener('click', () => emit('action', 'cinematic-tour', 'button'));
+  cinematicButton.addEventListener('click', () => {
+    emit('action', 'cinematic-tour', 'button');
+    collapseForMobile();
+  });
 
   const deepSpaceButton = document.createElement('button');
   deepSpaceButton.type = 'button';
   deepSpaceButton.className = 'solar-button solar-button--secondary';
   deepSpaceButton.textContent = '深空总览';
-  deepSpaceButton.addEventListener('click', () => emit('action', 'deep-space-view', 'button'));
+  deepSpaceButton.addEventListener('click', () => {
+    emit('action', 'deep-space-view', 'button');
+    collapseForMobile();
+  });
   actionRow.append(cinematicButton, deepSpaceButton);
 
   const sliderGroup = document.createElement('div');
@@ -330,7 +352,47 @@ export function createControlPanel({
 
   body.append(brand, targetGroup, actionRow, sliderGroup, toggleGroup, infoCard);
   panel.append(body);
-  shell.append(panel);
+  shell.append(panelToggle, panel);
+
+  function isMobileLayout() {
+    return mobileQuery ? mobileQuery.matches : typeof window !== 'undefined' && window.innerWidth <= 720;
+  }
+
+  function setPanelCollapsed(nextCollapsed, { focusToggle = false } = {}) {
+    panelCollapsed = isMobileLayout() ? Boolean(nextCollapsed) : false;
+    shell.classList.toggle('is-collapsed', panelCollapsed);
+    panelToggle.setAttribute('aria-expanded', String(!panelCollapsed));
+    panelToggle.setAttribute('aria-label', panelCollapsed ? '展开控制菜单' : '收起控制菜单');
+    panelToggle.querySelector('.solar-panel-toggle__label').textContent = panelCollapsed ? '控制' : '收起';
+    panel.setAttribute('aria-hidden', String(panelCollapsed));
+    if (panelCollapsed) {
+      dropdown.setOpen(false);
+    }
+    if (focusToggle) {
+      panelToggle.focus();
+    }
+    return panelCollapsed;
+  }
+
+  function collapseForMobile() {
+    if (isMobileLayout()) {
+      setPanelCollapsed(true);
+    }
+  }
+
+  panelToggle.addEventListener('click', () => {
+    setPanelCollapsed(!panelCollapsed);
+  });
+
+  const onMobileQueryChange = (event) => {
+    setPanelCollapsed(event.matches);
+  };
+
+  if (mobileQuery?.addEventListener) {
+    mobileQuery.addEventListener('change', onMobileQueryChange);
+  } else if (mobileQuery?.addListener) {
+    mobileQuery.addListener(onMobileQueryChange);
+  }
 
   function syncTimeScale(nextValue, { emitEvent = false } = {}) {
     const value = clamp(Number(nextValue), 0, 100);
@@ -430,6 +492,12 @@ export function createControlPanel({
       updateInfoPanel(infoCard, entry);
       return infoCard;
     },
+    setCollapsed(collapsed, options = {}) {
+      return setPanelCollapsed(collapsed, options);
+    },
+    get isCollapsed() {
+      return panelCollapsed;
+    },
     setDisabled(disabled = true) {
       dropdown.button.disabled = disabled;
       dropdown.setOpen(false);
@@ -448,6 +516,11 @@ export function createControlPanel({
       return () => listeners.delete(listener);
     },
     destroy() {
+      if (mobileQuery?.removeEventListener) {
+        mobileQuery.removeEventListener('change', onMobileQueryChange);
+      } else if (mobileQuery?.removeListener) {
+        mobileQuery.removeListener(onMobileQueryChange);
+      }
       dropdown.destroy();
       shell.remove();
       listeners.clear();
@@ -459,6 +532,7 @@ export function createControlPanel({
   for (const key of ['orbits', 'labels', 'bloom', 'pause']) {
     syncToggle(key, state[key], { emitEvent: false });
   }
+  setPanelCollapsed(panelCollapsed);
 
   if (mount) {
     mount.appendChild(shell);
